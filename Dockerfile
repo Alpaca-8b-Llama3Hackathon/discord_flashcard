@@ -2,21 +2,21 @@
 FROM python:3.9.18-bullseye
 
 # Set the working directory in the container
-WORKDIR /mugpt
+WORKDIR /discord-flashcard
 
 # update the system and add git
 RUN apt-get -y update && apt-get -y upgrade 
 RUN apt-get install git gcc libc-dev libffi-dev
 
 # Copy the current directory contents into the container
-COPY ./requirements.txt /mugpt
+COPY ./requirements.txt /discord-flashcard
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install --upgrade pip
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip3 install -r requirements.txt
 
 # copy project
-COPY . /mugpt
+COPY . /discord-flashcard
 # Install any needed packages specified in requirements.txt
 # Ensure you have a requirements.txt file with discord.py listed in it
 # RUN pip install --no-cache-dir -r requirements.txt

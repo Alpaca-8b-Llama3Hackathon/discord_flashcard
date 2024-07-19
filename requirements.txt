@@ -2,4 +2,5 @@ wheel
 discord.python
 aiosqlite
 freeGPT
+PyPDF2
 python-dotenv
