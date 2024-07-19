@@ -1,0 +1,5 @@
+wheel
+discord.python
+aiosqlite
+freeGPT
+python-dotenv
