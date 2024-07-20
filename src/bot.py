@@ -141,22 +141,6 @@ async def on_app_command_error(interaction, error):
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 #Upload File PDF
-@bot.tree.command(name="upload", description="Send PDF File")
-async def pdf_file(interaction):
-    
-    await interaction.send("OK")
-    attachment_url = interaction.message.attachments[0].url
-    print(attachment_url)
-    file_request = requests.get(attachment_url)
-
-    # Save File
-    if file_request.status_code == 200:
-        with open("file.pdf", "wb") as file:
-            file.write(file_request.content)
-            print("File downloaded successfully!")
-    else:
-        print("Failed to download the file.")
-    print(type(file_request))
 @bot.tree.command(name="send", description="Send PDF File")
 async def pdf_file(interaction,pdf: discord.Attachment):
     
