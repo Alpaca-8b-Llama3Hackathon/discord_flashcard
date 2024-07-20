@@ -1,6 +1,8 @@
 wheel
-discord.python
+discord.py
 aiosqlite
-freeGPT
 PyPDF2
 python-dotenv
+together
+
+# pip install git+https://github.com/Alpaca-8b-Llama3Hackathon/llama3-backend.git

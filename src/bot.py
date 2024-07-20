@@ -1,3 +1,8 @@
+import PyPDF2
+import io
+import asyncio
+
+from together import Together
 from os import remove
 from json import load
 from io import BytesIO
@@ -8,7 +13,7 @@ from discord.ui import Button, View
 from discord.ext.commands import Bot
 from dotenv import load_dotenv
 from aiohttp import ClientSession, ClientError
-from discord import Intents, Embed, File, Status, Activity, ActivityType, Colour
+from discord import Intents, Embed, File, Status, Activity, ActivityType, Colour, Attachment
 from discord.app_commands import (
     describe,
     checks,
@@ -22,17 +27,58 @@ import os
 def configure():
     load_dotenv()
 
+def initialize_together_client():
+    api_key = os.getenv("TOGETHER_API_KEY")
+    if not api_key:
+        raise ValueError("TOGETHER_API_KEY environment variable is not set")
+    return Together(api_key=api_key)
+
 intents = Intents.default()
 intents.message_content = True
 bot = Bot(command_prefix="!", intents=intents, help_command=None)
 db = None
-textCompModels = ["gpt3", "alpaca_7b", "falcon_40b"]
-imageGenModels = ["prodia", "pollinations"]
+textCompModels = ["llama3"]
+# imageGenModels = ["prodia", "pollinations"]
+
+async def process_pdf(attachment: Attachment):
+    pdf_content = await attachment.read()
+    pdf_file = io.BytesIO(pdf_content)
+    
+    text = ""
+    try:
+        pdf_reader = PyPDF2.PdfReader(pdf_file)
+        for page in pdf_reader.pages:
+            text += page.extract_text()
+    except Exception as e:
+        print(f"Error processing PDF: {str(e)}")
+        return None
+    
+    return text
+
+async def generate_text(prompt):
+    try:
+        messages = [{"role": "user", "content": prompt}]
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="meta-llama/Meta-Llama-3-8B-Instruct-Turbo",
+            messages=messages,
+            temperature=0.7,
+        )
+        if response.choices and len(response.choices) > 0:
+            return response.choices[0].message.content
+        else:
+            print("No choices in response")
+            return None
+    except Exception as e:
+        print(f"Error generating text: {str(e)}")
+        return None
 
 # Listener for bot initialization
 @bot.event
 async def on_ready():
     print(f"\033[1;94m INFO \033[0m| {bot.user} has connected to Discord.")
+    global client
+    client = initialize_together_client()
     global db
     db = await connect("database.db")
     async with db.cursor() as cursor:
@@ -103,7 +149,7 @@ async def help(interaction):
 
     embed.add_field(
         name="Models:",
-        value=f"**Text Completion:** `{', '.join(textCompModels)}`\n**Image Generation:** `{', '.join(imageGenModels)}`",
+        value=f"**Text Completion:** `{', '.join(textCompModels)}`",
         inline=False,
     )
 
@@ -116,42 +162,38 @@ async def help(interaction):
     view.add_item(
         Button(
             label="Invite Me",
-            url="",
+            url="https://discord.com/oauth2/authorize?client_id=1263923201193414776&permissions=8&integration_type=0&scope=bot",
         )
     )
     view.add_item(
         Button(
             label="Support Server",
-            url="",
+            url="https://discord.gg/YOUR_SUPPORT_SERVER_INVITE",
         )
     )
     view.add_item(
         Button(
-            label="Source (disabled)",
-            url="",
+            label="Source",
+            url="https://github.com/Alpaca-8b-Llama3Hackathon/discord_flashcard",
         )
     )
     await interaction.response.send_message(embed=embed, view=view)
 
 # /ask function
-@bot.tree.command(name="ask", description="Ask a model a question.")
-@describe(model=f"Model to use. Choose between {', '.join(textCompModels)}")
+@bot.tree.command(name="ask", description="Ask Llama 3 a question.")
 @describe(prompt="Your prompt.")
-async def ask(interaction, model: str, prompt: str):
-    if model.lower() not in textCompModels:
-        await interaction.response.send_message(
-            f"**Error:** Model not found! Choose a model between `{', '.join(textCompModels)}`."
-        )
-        return
+async def ask(interaction, prompt: str):
     try:
         await interaction.response.defer()
-        resp = await AsyncClient.create_completion(model, prompt)
-        if len(resp) <= 2000:
-            await interaction.followup.send(resp)
+        resp = await generate_text(prompt)
+        if resp:
+            if len(resp) <= 2000:
+                await interaction.followup.send(resp)
+            else:
+                file = File(fp=BytesIO(resp.encode("utf-8")), filename="message.txt")
+                await interaction.followup.send(file=file)
         else:
-            file = File(fp=BytesIO(resp.encode("utf-8")), filename="message.txt")
-            await interaction.followup.send(file=file)
-
+            await interaction.followup.send("Sorry, I couldn't generate a response.")
     except Exception as e:
         await interaction.followup.send(str(e))
 
@@ -243,35 +285,44 @@ async def on_message(message):
             if message.channel.id == channel_id:
                 await message.channel.edit(slowmode_delay=15)
                 async with message.channel.typing():
-                    if message.attachments and message.attachments[0].url.endswith(
-                        ".png"
-                    ):
-                        temp_image = "temp_image.jpg"
-                        async with ClientSession() as session:
-                            async with session.get(message.attachments[0].url) as image:
-                                image_content = await image.read()
-                                with open(temp_image, "wb") as file:
-                                    file.write(image_content)
-                                try:
-                                    with open(temp_image, "rb") as file:
-                                        data = file.read()
-                                finally:
-                                    remove(temp_image)
-                                async with session.post(
-                                    "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large",
-                                    data=data,
-                                    headers={"Authorization": f"Bearer {HF_TOKEN}"},
-                                    timeout=20,
-                                ) as resp:
-                                    resp_json = await resp.json()
-                                    if resp.status != 200:
-                                        raise ClientError(
-                                            "Unable to fetch the response."
+                    if message.attachments:
+                        attachment = message.attachments[0]
+                        if attachment.filename.lower().endswith('.pdf'):
+                            pdf_text = await process_pdf(attachment)
+                            if pdf_text:
+                                resp = await AsyncClient.create_completion(
+                                    model,
+                                    f"PDF content: {pdf_text[:1000]}... (truncated). Prompt: {message.content}"
+                                )
+                            else:
+                                resp = "Sorry, I couldn't process the PDF file."
+                        elif attachment.url.endswith(".png"):
+                            temp_image = "temp_image.jpg"
+                            async with ClientSession() as session:
+                                async with session.get(message.attachments[0].url) as image:
+                                    image_content = await image.read()
+                                    with open(temp_image, "wb") as file:
+                                        file.write(image_content)
+                                    try:
+                                        with open(temp_image, "rb") as file:
+                                            data = file.read()
+                                    finally:
+                                        remove(temp_image)
+                                    async with session.post(
+                                        "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large",
+                                        data=data,
+                                        headers={"Authorization": f"Bearer {HF_TOKEN}"},
+                                        timeout=20,
+                                    ) as resp:
+                                        resp_json = await resp.json()
+                                        if resp.status != 200:
+                                            raise ClientError(
+                                                "Unable to fetch the response."
+                                            )
+                                        resp = await AsyncClient.create_completion(
+                                            model,
+                                            f"Image detected, description: {resp_json[0]['generated_text']}. Prompt: {message.content}",
                                         )
-                                    resp = await AsyncClient.create_completion(
-                                        model,
-                                        f"Image detected, description: {resp_json[0]['generated_text']}. Prompt: {message.content}",
-                                    )
                     else:
                         resp = await AsyncClient.create_completion(
                             model, message.content
@@ -303,7 +354,8 @@ if __name__ == "__main__":
     # Public
     configure()
     HF_TOKEN = os.getenv('HF_TOKEN')
-    BOT_TOKEN = os.getenv('BOT_TOKEN')
+    # BOT_TOKEN = os.getenv('BOT_TOKEN')
+    BOT_TOKEN = ""
     run(bot.run(BOT_TOKEN))
 
     # # Private
