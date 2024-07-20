@@ -22,11 +22,18 @@ from discord.app_commands import (
     MissingPermissions,
     CommandOnCooldown,
 )
+
+from flashcard_backend.question import get_questions
+
 import discord
 import os
 
-def configure():
-    load_dotenv()
+path = "pdf path" #Path of file
+questions_and_answers = get_questions(path, api_key=os.getenv("TOGETHER_API_KEY"))
+text = []
+for question, answer in questions_and_answers:
+    text.append([question, answer])
+
 
 def initialize_together_client():
     api_key = os.getenv("TOGETHER_API_KEY")
@@ -98,6 +105,42 @@ async def on_ready():
             ),
         )
         await sleep(300)
+
+# WA Content
+qa_mode = False
+num_question = -1
+qa_template = "Question! : "
+
+@bot.tree.command(name="genflashcard", description="Send PDF File")
+async def gen_flashcard(interaction,qa_size:int):
+    global qa_mode
+    global num_question
+    num_question = qa_size - 1
+    qa_mode = True
+    num_question -= 1
+    await interaction.response.send_message("Start Question\n" + qa_template + text[num_question+1][0])
+    # num_question -= 1
+
+@bot.event
+async def on_message(message):
+    
+    global qa_mode
+    global num_question
+    if(message.author == bot.user):
+        return
+
+    if(num_question < 0 and qa_mode):
+        qa_mode = False
+        num_question = -1
+        await message.channel.send("Ending Flashcard")
+    if(qa_mode and num_question >= 0):
+        # await message.channel.send("True")
+        num_question -= 1
+        await message.channel.send(qa_template + text[num_question+1][0])
+        # print("chk")
+        # num_question -= 1
+        
+    await bot.process_commands(message)
 
 # Event Listener on remove
 @bot.event
@@ -371,7 +414,6 @@ async def on_message(message):
 
 if __name__ == "__main__":
     # Public
-    configure()
     # HF_TOKEN = os.getenv('HF_TOKEN')
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     # BOT_TOKEN = ""
