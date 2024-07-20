@@ -4,5 +4,6 @@ aiosqlite
 PyPDF2
 python-dotenv
 together
+requests
 
 # pip install git+https://github.com/Alpaca-8b-Llama3Hackathon/llama3-backend.git

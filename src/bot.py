@@ -1,14 +1,15 @@
 import PyPDF2
 import io
 import asyncio
-
+import requests
+import discord
 from together import Together
 from os import remove
 from json import load
 from io import BytesIO
 from aiosqlite import connect
 from asyncio import sleep, run
-from freeGPT import AsyncClient
+# from freeGPT import AsyncClient
 from discord.ui import Button, View
 from discord.ext.commands import Bot
 from dotenv import load_dotenv
@@ -138,6 +139,40 @@ async def on_app_command_error(interaction, error):
             )
         )
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+#Upload File PDF
+@bot.tree.command(name="upload", description="Send PDF File")
+async def pdf_file(interaction):
+    
+    await interaction.send("OK")
+    attachment_url = interaction.message.attachments[0].url
+    print(attachment_url)
+    file_request = requests.get(attachment_url)
+
+    # Save File
+    if file_request.status_code == 200:
+        with open("file.pdf", "wb") as file:
+            file.write(file_request.content)
+            print("File downloaded successfully!")
+    else:
+        print("Failed to download the file.")
+    print(type(file_request))
+@bot.tree.command(name="send", description="Send PDF File")
+async def pdf_file(interaction,pdf: discord.Attachment):
+    
+    await interaction.response.send_message("OK")
+    # print(str)
+    attachment_url = pdf.url
+    print(attachment_url)
+    file_request = requests.get(attachment_url)
+
+    # Save File
+    if file_request.status_code == 200:
+        with open("file.pdf", "wb") as file:
+            file.write(file_request.content)
+            print("File downloaded successfully!")
+    else:
+        print("Failed to download the file.")
 
 # Helper function
 @bot.tree.command(name="help", description="Get help.")
@@ -354,8 +389,8 @@ if __name__ == "__main__":
     # Public
     configure()
     HF_TOKEN = os.getenv('HF_TOKEN')
-    # BOT_TOKEN = os.getenv('BOT_TOKEN')
-    BOT_TOKEN = ""
+    BOT_TOKEN = os.getenv('BOT_TOKEN')
+    # BOT_TOKEN = ""
     run(bot.run(BOT_TOKEN))
 
     # # Private
