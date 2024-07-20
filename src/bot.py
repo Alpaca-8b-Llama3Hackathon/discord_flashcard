@@ -2,7 +2,7 @@ import PyPDF2
 import io
 import asyncio
 import requests
-import discord
+
 from together import Together
 from os import remove
 from json import load
@@ -22,7 +22,7 @@ from discord.app_commands import (
     MissingPermissions,
     CommandOnCooldown,
 )
-
+import discord
 import os
 
 def configure():
@@ -372,7 +372,7 @@ async def on_message(message):
 if __name__ == "__main__":
     # Public
     configure()
-    HF_TOKEN = os.getenv('HF_TOKEN')
+    # HF_TOKEN = os.getenv('HF_TOKEN')
     BOT_TOKEN = os.getenv('BOT_TOKEN')
     # BOT_TOKEN = ""
     run(bot.run(BOT_TOKEN))
