@@ -79,39 +79,108 @@ async def process_pdf(pdf_file: str):
 #     except Exception as e:
 #         print(f"Error generating text: {str(e)}")
 #         return None
+from dataclasses import dataclass
+import random
 
+@dataclass
+class Question:
+    score: float
+    question: str
+    answer: str
+    index: int
 
 class QAView(discord.ui.View):
     def __init__(self, qa_pairs):
         super().__init__(timeout=None)
-        self.qa_pairs = qa_pairs
+        # self.qa_pairs = qa_pairs
+        self.qa_pairs = [Question(0, question, answer, i) for i, (question, answer) in enumerate(qa_pairs[:10])]
+        self.colors = [discord.Color.random() for _ in range(len(self.qa_pairs))]
         self.current_index = 0
 
-    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, custom_id="back", disabled=True)
-    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current_index = max(0, self.current_index - 1)
-        await self.update_message(interaction)
+     # @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, custom_id="back", disabled=True)
+    # async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #     self.current_index = max(0, self.current_index - 1)
+    #     await self.update_message(interaction)
 
-    @discord.ui.button(label="Answer", style=discord.ButtonStyle.primary, custom_id="answer")
-    async def answer_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    # @discord.ui.button(label="Answer", style=discord.ButtonStyle.primary, custom_id="answer")
+    # async def answer_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #     current_pair = self.qa_pairs[self.current_index]
+    #     embed = discord.Embed(title="Q&A from PDF", color=discord.Color.green())
+    #     embed.add_field(name="Question", value=current_pair[0], inline=False)
+    #     embed.add_field(name="Answer", value=current_pair[1], inline=False)
+    #     await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    # @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, custom_id="next")
+    # async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    #     self.current_index = min(len(self.qa_pairs) - 1, self.current_index + 1)
+    #     await self.update_message(interaction)
+
+    def rate_button(self):
+        self.current_index += 1
+        if self.current_index >= len(self.qa_pairs):
+            self.current_index = 0
+
+    def update_qa(self, index, score):
+        self.qa_pairs[index].score += score
+        
+        if self.qa_pairs[index].score >= 5:
+            self.qa_pairs.pop(index)
+            return
+
+        insert_index = self.qa_pairs[index].score + score
+        insert_index = min(insert_index, len(self.qa_pairs)-1)
+        self.qa_pairs.insert(insert_index, self.qa_pairs.pop(index))
+
+
+    @discord.ui.button(label="", style=discord.ButtonStyle.red, custom_id="rate_1", emoji="💀")
+    async def rate_1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.update_qa(self.current_index, 1)
+        await self.update_message(interaction)        
+
+    @discord.ui.button(label="", style=discord.ButtonStyle.gray, custom_id="rate_2", emoji="2️⃣")
+    async def rate_2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.update_qa(self.current_index, 2)
+        await self.update_message(interaction)        
+
+    @discord.ui.button(label="", style=discord.ButtonStyle.gray, custom_id="rate_3", emoji="3️⃣")
+    async def rate_3(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.update_qa(self.current_index, 3)
+        await self.update_message(interaction)     
+
+    @discord.ui.button(label="", style=discord.ButtonStyle.gray, custom_id="rate_4", emoji="4️⃣")
+    async def rate_4(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.update_qa(self.current_index, 4)
+        await self.update_message(interaction)    
+
+    @discord.ui.button(label="", style=discord.ButtonStyle.green, custom_id="rate_5", emoji="👑")
+    async def rate_5(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.update_qa(self.current_index, 5)
+        await self.update_message(interaction)      
+
+    @discord.ui.button(label="Show Answer", style=discord.ButtonStyle.secondary, custom_id="show_answer")
+    async def show_answer(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # embed = self.get_embed()
+        # embed.add_field(name="Answer", value=self.qa_pairs[self.current_index].answer, inline=False)
+        question_no = self.qa_pairs[self.current_index].index + 1
+        answer_embed = discord.Embed(title=f"Answer Question: {question_no}", color=discord.Color.green())
+        answer_embed.add_field(name="Answer", value=self.qa_pairs[self.current_index].answer, inline=False)
+        await interaction.response.edit_message(embeds=[self.get_embed(), answer_embed], view=self)
+      
+    def get_embed(self):
         current_pair = self.qa_pairs[self.current_index]
-        embed = discord.Embed(title="Q&A from PDF", color=discord.Color.green())
-        embed.add_field(name="Question", value=current_pair[0], inline=False)
-        embed.add_field(name="Answer", value=current_pair[1], inline=False)
-        await interaction.response.send_message(embed=embed, ephemeral=True)
+        embed = discord.Embed(title=f"{len(self.qa_pairs)} questions remainings..", color=self.colors[self.qa_pairs[self.current_index].index])
+        embed.add_field(name=f"Question #: {current_pair.index+1}", value=current_pair.question, inline=False)
+        return embed
 
-    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, custom_id="next")
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.current_index = min(len(self.qa_pairs) - 1, self.current_index + 1)
-        await self.update_message(interaction)
-
+        
     async def update_message(self, interaction: discord.Interaction):
-        self.back_button.disabled = (self.current_index == 0)
-        self.next_button.disabled = (self.current_index == len(self.qa_pairs) - 1)
-        current_pair = self.qa_pairs[self.current_index]
-        embed = discord.Embed(title=f"Question {self.current_index + 1}/{len(self.qa_pairs)}", color=discord.Color.blue())
-        embed.add_field(name="Question", value=current_pair[0], inline=False)
-        await interaction.response.edit_message(embed=embed, view=self)
+        # self.back_button.disabled = (self.current_index == 0)
+        # # self.next_button.disabled = (self.current_index == len(self.qa_pairs) - 1)
+        # current_pair = self.qa_pairs[self.current_index]
+        # embed = discord.Embed(title=f"Question {self.current_index + 1}/{len(self.qa_pairs)}", color=discord.Color.blue())
+        # embed.add_field(name="Question", value=current_pair.question, inline=False)
+
+        await interaction.response.edit_message(embeds=[self.get_embed()], view=self)
 
 
 # Listener for bot initialization
@@ -564,10 +633,11 @@ async def play(interaction: discord.Interaction, index: str):
     # print(f"Flashcards: {flashcards}")
     # flashcard_count = len(flashcards)
     view = QAView(flashcards)
-    first_pair = flashcards[0]
-    embed = discord.Embed(title=f"Question 1/{len(flashcards)}", color=discord.Color.blue())
-    embed.add_field(name="Question", value=first_pair[0], inline=False)
-    await interaction.followup.send(embed=embed, view=view)
+    embed = view.get_embed()
+    # first_pair = flashcards[0]
+    # embed = discord.Embed(title=f"Question 1/{len(flashcards)}", color=discord.Color.blue())
+    # embed.add_field(name="Question", value=first_pair[0], inline=False)
+    await interaction.followup.send(embeds=[embed], view=view)
 
 if __name__ == "__main__":
     # Public
