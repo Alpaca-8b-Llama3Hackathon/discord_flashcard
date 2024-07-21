@@ -6,9 +6,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 import aiosqlite
 import PyPDF2
-import io
 from dataclasses import dataclass
-import random
 import asyncio
 from flashcard_backend.question import get_questions
 
@@ -41,11 +39,6 @@ class QAView(discord.ui.View):
         self.colors = [discord.Color.random() for _ in range(len(self.qa_pairs))]
         self.current_index = 0
 
-    def rate_button(self):
-        self.current_index += 1
-        if self.current_index >= len(self.qa_pairs):
-            self.current_index = 0
-
     def update_qa(self, index, score):
         self.qa_pairs[index].score += score
 
@@ -53,73 +46,87 @@ class QAView(discord.ui.View):
             self.qa_pairs.pop(index)
             return
         
-        if self.qa_pairs[index].score <= 0:
-            self.qa_pairs[index].score = 0
+        self.qa_pairs[index].score = max(0, self.qa_pairs[index].score)
 
-        insert_index = self.qa_pairs[index].score + score
-        insert_index = min(insert_index, len(self.qa_pairs)-1)
+        insert_index = min(self.qa_pairs[index].score + score, len(self.qa_pairs) - 1)
         self.qa_pairs.insert(insert_index, self.qa_pairs.pop(index))
 
     @discord.ui.button(label="", style=discord.ButtonStyle.red, custom_id="rate_1", emoji="💀")
     async def rate_1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.update_qa(self.current_index, -1)
-        await self.update_message(interaction)        
+        await self.rate_question(interaction, -1)
 
     @discord.ui.button(label="", style=discord.ButtonStyle.gray, custom_id="rate_2", emoji="2️⃣")
     async def rate_2(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.update_qa(self.current_index, 2)
-        await self.update_message(interaction)        
+        await self.rate_question(interaction, 2)
 
     @discord.ui.button(label="", style=discord.ButtonStyle.gray, custom_id="rate_3", emoji="3️⃣")
     async def rate_3(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.update_qa(self.current_index, 3)
-        await self.update_message(interaction)     
+        await self.rate_question(interaction, 3)
 
     @discord.ui.button(label="", style=discord.ButtonStyle.gray, custom_id="rate_4", emoji="4️⃣")
     async def rate_4(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.update_qa(self.current_index, 4)
-        await self.update_message(interaction)    
+        await self.rate_question(interaction, 4)
 
     @discord.ui.button(label="", style=discord.ButtonStyle.green, custom_id="rate_5", emoji="👑")
     async def rate_5(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.update_qa(self.current_index, 5)
-        await self.update_message(interaction)      
+        await self.rate_question(interaction, 5)
+
+    async def rate_question(self, interaction: discord.Interaction, score: int):
+        self.update_qa(self.current_index, score)
+        if len(self.qa_pairs) == 0:
+            await self.show_successful_embed(interaction)
+        else:
+            await self.update_message(interaction)
 
     @discord.ui.button(label="Show Answer", style=discord.ButtonStyle.secondary, custom_id="show_answer")
     async def show_answer(self, interaction: discord.Interaction, button: discord.ui.Button):
-        question_no = self.qa_pairs[self.current_index].index + 1
-        answer_embed = discord.Embed(title=f"Answer Question: {question_no}", color=discord.Color.green())
-        answer_embed.add_field(name="Answer", value=self.qa_pairs[self.current_index].answer, inline=False)
-        await interaction.response.edit_message(embeds=[self.get_embed(), answer_embed], view=self)
+        if len(self.qa_pairs) == 0:
+            await self.show_successful_embed(interaction)
+        else:
+            question_no = self.qa_pairs[self.current_index].index + 1
+            answer_embed = discord.Embed(title=f"Answer Question: {question_no}", color=discord.Color.green())
+            answer_embed.add_field(name="Answer", value=self.qa_pairs[self.current_index].answer, inline=False)
+            await interaction.response.edit_message(embeds=[self.get_embed(), answer_embed], view=self)
       
     def get_embed(self):
+        if len(self.qa_pairs) == 0:
+            return self.get_successful_embed()
         current_pair = self.qa_pairs[self.current_index]
-        embed = discord.Embed(title=f"{len(self.qa_pairs)} questions remaining..", color=self.colors[self.qa_pairs[self.current_index].index])
+        embed = discord.Embed(title=f"{len(self.qa_pairs)} questions remaining..", color=self.colors[current_pair.index])
         embed.add_field(name=f"Question #: {current_pair.index+1}", value=current_pair.question, inline=False)
         return embed
 
+    def get_successful_embed(self):
+        embed = discord.Embed(title="Congratulations! 🎉", color=discord.Color.gold())
+        embed.description = "You've completed all the flashcards!"
+        embed.add_field(name="Great job!", value="You've mastered all the questions. Keep up the good work!", inline=False)
+        return embed
+
     async def update_message(self, interaction: discord.Interaction):
-        await interaction.response.edit_message(embeds=[self.get_embed()], view=self)
+        if len(self.qa_pairs) == 0:
+            await self.show_successful_embed(interaction)
+        else:
+            await interaction.response.edit_message(embeds=[self.get_embed()], view=self)
+
+    async def show_successful_embed(self, interaction: discord.Interaction):
+        successful_embed = self.get_successful_embed()
+        for child in self.children:
+            child.disabled = True
+        await interaction.response.edit_message(embeds=[successful_embed], view=self)
 
 async def process_pdf(pdf_file: str):
-    text = ""
     try:
-        pdf_reader = PyPDF2.PdfReader(pdf_file)
-        for page in pdf_reader.pages:
-            text += page.extract_text()
+        with open(pdf_file, 'rb') as file:
+            pdf_reader = PyPDF2.PdfReader(file)
+            return ' '.join(page.extract_text() for page in pdf_reader.pages)
     except Exception as e:
         print(f"Error processing PDF: {str(e)}")
         return None
-    
-    return text
 
 async def get_pdf_file_content(index):
-    cursor = await db.execute(
-        "SELECT pdf_path FROM pdfs WHERE id = ?",
-        (index,),
-    )
-
-    pdf_path = await cursor.fetchone()
+    async with db.execute("SELECT pdf_path FROM pdfs WHERE id = ?", (index,)) as cursor:
+        pdf_path = await cursor.fetchone()
+    
     if not pdf_path:
         return ("error", "PDF content not found. Please enter a valid index number.", "")
     
@@ -154,28 +161,60 @@ async def upload_pdf(interaction: discord.Interaction, attachment: discord.Attac
 
     await interaction.response.defer()
 
-    save_dir = str(Path(__file__).parent / "temp" / attachment.filename)
-    os.makedirs(os.path.dirname(save_dir), exist_ok=True)
+    save_dir = Path(__file__).parent / "temp" / attachment.filename
+    save_dir.parent.mkdir(parents=True, exist_ok=True)
 
     try:
-        await attachment.save(save_dir)
+        await attachment.save(str(save_dir))
 
-        cursor = await db.execute(
+        async with db.execute(
             "SELECT pdf_title FROM pdfs WHERE guilds = ? AND pdf_title = ?",
             (interaction.guild.id, attachment.filename),
-        )
-
-        if await cursor.fetchone():
-            await interaction.followup.send("PDF content already stored.", ephemeral=True)
-            return
+        ) as cursor:
+            if await cursor.fetchone():
+                await interaction.followup.send("PDF content already stored.", ephemeral=True)
+                return
 
         await db.execute(
             "INSERT INTO pdfs (guilds, pdf_path, pdf_title) VALUES (?, ?, ?)",
-            (interaction.guild.id, save_dir, attachment.filename),
+            (interaction.guild.id, str(save_dir), attachment.filename),
         )
         await db.commit()
 
         await interaction.followup.send("PDF content stored successfully.")
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="list_pdf", description="List all uploaded PDFs")
+async def list_pdf(interaction: discord.Interaction):
+    await interaction.response.defer()
+    
+    if not db:
+        await interaction.followup.send("Database connection error.", ephemeral=True)
+        return
+    
+    try:
+        async with db.execute("SELECT pdf_title, id FROM pdfs WHERE guilds = ? ORDER BY id", (interaction.guild.id,)) as cursor:
+            pdf_list = await cursor.fetchall()
+        
+        if not pdf_list:
+            await interaction.followup.send("No PDFs have been uploaded yet.", ephemeral=True)
+            return
+
+        embed = discord.Embed(title="Uploaded PDFs", color=discord.Color.blue())
+        
+        # Create a table-like format
+        table = "```\n{:<50} : {:<10}\n".format("Filename", "Index")
+        table += "-" * 62 + "\n"
+        
+        for pdf_name, index in pdf_list:
+            table += "{:<50} : {:<10}\n".format(pdf_name[:50], index)
+        
+        table += "```"
+        
+        embed.description = table
+        
+        await interaction.followup.send(embed=embed)
     except Exception as e:
         await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
 
@@ -185,12 +224,9 @@ async def show_pdf_content(interaction: discord.Interaction, index: int):
     await interaction.response.defer()
 
     try:
-        cursor = await db.execute(
-            "SELECT pdf_path FROM pdfs WHERE id = ?",
-            (index,),
-        )
-
-        pdf_path = await cursor.fetchone()
+        async with db.execute("SELECT pdf_path FROM pdfs WHERE id = ?", (index,)) as cursor:
+            pdf_path = await cursor.fetchone()
+        
         if not pdf_path:
             await interaction.followup.send("PDF content not found. Please enter a valid index number.", ephemeral=True)
             return
@@ -221,20 +257,18 @@ async def gen_flashcard(interaction: discord.Interaction, pdf_index: int):
         return
     
     try:
-        loop = asyncio.get_event_loop()
-        questions_and_answers = await loop.run_in_executor(None, lambda: list(
-            get_questions(file=pdf_path, api_key=TOGETHER_API_KEY)
-        ))
+        questions_and_answers = await asyncio.to_thread(get_questions, file=pdf_path, api_key=TOGETHER_API_KEY)
 
         if not questions_and_answers:
             await interaction.followup.send("No questions were generated from the PDF.")
             return
-        for question, answer in questions_and_answers:
-            await db.execute(
-                "INSERT INTO flashcards (guilds, questions, answers, pdf_index) VALUES (?, ?, ?, ?)",
-                (interaction.guild.id, question, answer, pdf_index),
-            )
-        await db.commit()
+
+        async with db.executemany(
+            "INSERT INTO flashcards (guilds, questions, answers, pdf_index) VALUES (?, ?, ?, ?)",
+            [(interaction.guild.id, question, answer, pdf_index) for question, answer in questions_and_answers]
+        ):
+            await db.commit()
+        
         await interaction.followup.send("Flashcards created successfully.")
     except Exception as e:
         await interaction.followup.send(f"An error occurred: {str(e)}")
@@ -249,24 +283,66 @@ async def play(interaction: discord.Interaction, index: str):
         return
     
     try:
-        if index.lower() == "all":
-            cursor = await db.execute(
-                "SELECT questions, answers FROM flashcards WHERE guilds = ?",
-                (guild_id,),
-            )
-        else:
-            cursor = await db.execute(
-                "SELECT questions, answers FROM flashcards WHERE guilds = ? AND pdf_index = ?",
-                (guild_id, int(index)),
-            )
+        query = "SELECT questions, answers FROM flashcards WHERE guilds = ?"
+        params = [guild_id]
+        
+        if index.lower() != "all":
+            query += " AND pdf_index = ?"
+            params.append(int(index))
 
-        flashcards = await cursor.fetchall()
+        async with db.execute(query, params) as cursor:
+            flashcards = await cursor.fetchall()
+
         if not flashcards:
             await interaction.followup.send("No flashcards found.", ephemeral=True)
             return
+
         view = QAView(flashcards)
         embed = view.get_embed()
         await interaction.followup.send(embeds=[embed], view=view)
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
+
+@bot.tree.command(name="delete", description="Delete a PDF and its associated flashcards")
+@app_commands.describe(index="Index of the PDF to delete")
+async def delete_pdf(interaction: discord.Interaction, index: int):
+    await interaction.response.defer()
+    
+    if not db:
+        await interaction.followup.send("Database connection error.", ephemeral=True)
+        return
+    
+    try:
+        # Check if the PDF exists
+        async with db.execute("SELECT pdf_path, pdf_title FROM pdfs WHERE id = ? AND guilds = ?", (index, interaction.guild.id)) as cursor:
+            pdf_info = await cursor.fetchone()
+        
+        if not pdf_info:
+            await interaction.followup.send(f"No PDF found with index {index}.", ephemeral=True)
+            return
+
+        pdf_path, pdf_title = pdf_info
+
+        # Delete the PDF file
+        try:
+            os.remove(pdf_path)
+        except OSError as e:
+            print(f"Error deleting file: {e}")
+
+        # Delete the PDF entry from the database
+        await db.execute("DELETE FROM pdfs WHERE id = ? AND guilds = ?", (index, interaction.guild.id))
+        
+        # Delete associated flashcards
+        await db.execute("DELETE FROM flashcards WHERE pdf_index = ? AND guilds = ?", (index, interaction.guild.id))
+        
+        await db.commit()
+
+        embed = discord.Embed(title="PDF Deleted", color=discord.Color.green())
+        embed.add_field(name="PDF Name", value=pdf_title, inline=False)
+        embed.add_field(name="Index", value=str(index), inline=False)
+        embed.add_field(name="Status", value="PDF and associated flashcards have been deleted.", inline=False)
+        
+        await interaction.followup.send(embed=embed)
     except Exception as e:
         await interaction.followup.send(f"An error occurred: {str(e)}", ephemeral=True)
 
@@ -274,9 +350,11 @@ async def play(interaction: discord.Interaction, index: str):
 async def help_command(interaction: discord.Interaction):
     embed = discord.Embed(title="Bot Help", description="Here are the available commands:", color=discord.Color.blue())
     embed.add_field(name="/upload_pdf", value="Upload a PDF file to the bot.", inline=False)
+    embed.add_field(name="/list_pdf", value="List all uploaded PDFs.", inline=False)
     embed.add_field(name="/show_pdf_content", value="Display a snippet of stored PDF content.", inline=False)
     embed.add_field(name="/create_flashcard", value="Create flashcards from a stored PDF.", inline=False)
     embed.add_field(name="/play", value="Play a flashcard game using stored flashcards.", inline=False)
+    embed.add_field(name="/delete", value="Delete a PDF and its associated flashcards.", inline=False)
     embed.add_field(name="/help", value="Show this help message.", inline=False)
     await interaction.response.send_message(embed=embed)
 
