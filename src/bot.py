@@ -80,6 +80,40 @@ async def process_pdf(pdf_file: str):
 #         print(f"Error generating text: {str(e)}")
 #         return None
 
+
+class QAView(discord.ui.View):
+    def __init__(self, qa_pairs):
+        super().__init__(timeout=None)
+        self.qa_pairs = qa_pairs
+        self.current_index = 0
+
+    @discord.ui.button(label="Back", style=discord.ButtonStyle.secondary, custom_id="back", disabled=True)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_index = max(0, self.current_index - 1)
+        await self.update_message(interaction)
+
+    @discord.ui.button(label="Answer", style=discord.ButtonStyle.primary, custom_id="answer")
+    async def answer_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        current_pair = self.qa_pairs[self.current_index]
+        embed = discord.Embed(title="Q&A from PDF", color=discord.Color.green())
+        embed.add_field(name="Question", value=current_pair[0], inline=False)
+        embed.add_field(name="Answer", value=current_pair[1], inline=False)
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.secondary, custom_id="next")
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_index = min(len(self.qa_pairs) - 1, self.current_index + 1)
+        await self.update_message(interaction)
+
+    async def update_message(self, interaction: discord.Interaction):
+        self.back_button.disabled = (self.current_index == 0)
+        self.next_button.disabled = (self.current_index == len(self.qa_pairs) - 1)
+        current_pair = self.qa_pairs[self.current_index]
+        embed = discord.Embed(title=f"Question {self.current_index + 1}/{len(self.qa_pairs)}", color=discord.Color.blue())
+        embed.add_field(name="Question", value=current_pair[0], inline=False)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
 # Listener for bot initialization
 @bot.event
 async def on_ready():
@@ -224,9 +258,7 @@ async def help(interaction):
 #     except Exception as e:
 #         await interaction.followup.send(str(e))
 
-@bot.tree.command(name="show_pdf_content", description="Displays a snippet of the stored PDF content.")
-@describe(index="Index of the PDF content to display.")
-async def show_pdf_content(interaction: discord.Interaction, index: int):
+async def get_pdf_file_content(index):
     cursor = await db.execute(
         "SELECT pdf_path FROM pdfs WHERE id = ?",
         (index,),
@@ -234,15 +266,35 @@ async def show_pdf_content(interaction: discord.Interaction, index: int):
 
     pdf_path = await cursor.fetchone()
     if not pdf_path:
-        await interaction.response.send_message("PDF content not found. Please enter a valid index number.", ephemeral=True)
-        return
+        return ("error", "PDF content not found. Please enter a valid index number.", "")
+    
+    pdf_content = await process_pdf(pdf_path[0])
+    return ("success", pdf_content, pdf_path[0])
+
+@bot.tree.command(name="show_pdf_content", description="Displays a snippet of the stored PDF content.")
+@describe(index="Index of the PDF content to display.")
+async def show_pdf_content(interaction: discord.Interaction, index: int):
+    # cursor = await db.execute(
+    #     "SELECT pdf_path FROM pdfs WHERE id = ?",
+    #     (index,),
+    # )
+
+    # pdf_path = await cursor.fetchone()
+    # if not pdf_path:
+    #     await interaction.response.send_message("PDF content not found. Please enter a valid index number.", ephemeral=True)
+    #     return
     
     # Ensure the index is within the bounds of the pdf_texts list
     # if index < 0 or index >= len(pdf_texts):
     #     await interaction.response.send_message("Invalid index. Please enter a valid index number.", ephemeral=True)
     #     return
     # pdf_content = pdf_texts[index]
-    pdf_content = await process_pdf(pdf_path[0])
+    # pdf_content = await process_pdf(pdf_path[0])
+    pdf_status, pdf_content, pdf_path = await get_pdf_file_content(index)
+    if pdf_status == "error":
+        await interaction.response.send_message(pdf_content, ephemeral=True)
+        return
+        
     snippet = pdf_content[:500] + "..." if len(pdf_content) > 500 else pdf_content
     
     embed = discord.Embed(title=f"PDF Content Snippet (Index {index})", description=f"```{snippet}```", color=discord.Color.blue())
@@ -445,6 +497,77 @@ async def on_message(message):
             #             mention_author=False,
             #         )
 
+
+@bot.tree.command(name="create_flashcard", description="Create a flashcard.")
+@describe(pdf_index="Create a flashcard question using the PDF content.")
+async def gen_flashcard(interaction: discord.Interaction, pdf_index: int):
+    await interaction.response.defer()
+    if not db:
+        await interaction.response.send_message("Database connection error.", ephemeral=True)
+        return
+    
+    pdf_status, pdf_content, pdf_path = await get_pdf_file_content(pdf_index)
+    if pdf_status == "error":
+        await interaction.response.send_message(pdf_content, ephemeral=True)
+        return
+    
+    # Create DB Table
+    await db.execute(
+        "CREATE TABLE IF NOT EXISTS flashcards (guilds INTEGER, questions TEXT, answers TEXT, pdf_index INTEGER, id INTEGER PRIMARY KEY)"
+    )
+    await db.commit()
+
+    try:
+        loop = asyncio.get_event_loop()
+        questions_and_answers = await loop.run_in_executor(None, lambda: list(
+            get_questions(file=pdf_path, api_key=os.getenv("TOGETHER_API_KEY"))
+        ))
+
+        if not questions_and_answers:
+            await interaction.followup.send("No questions were generated from the PDF.")
+            return
+        for question, answer in questions_and_answers:
+            await db.execute(
+                "INSERT INTO flashcards (guilds, questions, answers, pdf_index) VALUES (?, ?, ?, ?)",
+                (interaction.guild.id, question, answer, pdf_index),
+            )
+        await db.commit()
+        await interaction.followup.send("Flashcards created successfully.")
+    except Exception as e:
+        await interaction.followup.send(f"An error occurred: {str(e)}")
+
+
+@bot.tree.command(name="play", description="Play a flashcard game.")
+@describe(index="Play flashcards using the PDF (index number) or (all) to play all flashcards.")
+async def play(interaction: discord.Interaction, index: str):
+    await interaction.response.defer()
+    guild_id = interaction.guild.id
+    if not db:
+        await interaction.response.send_message("Database connection error.", ephemeral=True)
+        return
+    
+    if index == "all":
+        cursor = await db.execute(
+            "SELECT questions, answers FROM flashcards WHERE guilds = ?",
+            (guild_id,),
+        )
+    else:
+        cursor = await db.execute(
+            "SELECT questions, answers FROM flashcards WHERE guilds = ? AND pdf_index = ?",
+            (guild_id, index),
+        )
+
+    flashcards = await cursor.fetchall()
+    if not flashcards:
+        await interaction.response.send_message("No flashcards found.", ephemeral=True)
+        return
+    # print(f"Flashcards: {flashcards}")
+    # flashcard_count = len(flashcards)
+    view = QAView(flashcards)
+    first_pair = flashcards[0]
+    embed = discord.Embed(title=f"Question 1/{len(flashcards)}", color=discord.Color.blue())
+    embed.add_field(name="Question", value=first_pair[0], inline=False)
+    await interaction.followup.send(embed=embed, view=view)
 
 if __name__ == "__main__":
     # Public
