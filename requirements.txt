@@ -3,13 +3,10 @@ discord.py
 aiosqlite
 PyPDF2
 python-dotenv
-togethertall
+together
 requests
-llama-index,
-llama-index-embeddings-together,
-llama-index-llms-openai-like,
-llama-index-vector-stores-faiss
-pymilvus
-llama-index-vector-stores-milvus
+llama-index
+llama-index-embeddings-together
+llama-index-llms-openai-like
 
-# pip install git+https://github.com/Alpaca-8b-Llama3Hackathon/llama3-backend.git
+# pip install git+https://github.com/Alpaca-8b-Llama3Hackathon/llama3-backend.git@lite
