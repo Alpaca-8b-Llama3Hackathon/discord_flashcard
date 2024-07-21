@@ -93,7 +93,7 @@ class QAView(discord.ui.View):
     def __init__(self, qa_pairs):
         super().__init__(timeout=None)
         # self.qa_pairs = qa_pairs
-        self.qa_pairs = [Question(0, question, answer, i) for i, (question, answer) in enumerate(qa_pairs[:10])]
+        self.qa_pairs = [Question(0, question, answer, i) for i, (question, answer) in enumerate(qa_pairs)]
         self.colors = [discord.Color.random() for _ in range(len(self.qa_pairs))]
         self.current_index = 0
 
@@ -122,10 +122,13 @@ class QAView(discord.ui.View):
 
     def update_qa(self, index, score):
         self.qa_pairs[index].score += score
-        
-        if self.qa_pairs[index].score >= 5:
+
+        if self.qa_pairs[index].score >= 8:
             self.qa_pairs.pop(index)
             return
+        
+        if self.qa_pairs[index].score <= 0:
+            self.qa_pairs[index].score = 0
 
         insert_index = self.qa_pairs[index].score + score
         insert_index = min(insert_index, len(self.qa_pairs)-1)
@@ -134,7 +137,7 @@ class QAView(discord.ui.View):
 
     @discord.ui.button(label="", style=discord.ButtonStyle.red, custom_id="rate_1", emoji="💀")
     async def rate_1(self, interaction: discord.Interaction, button: discord.ui.Button):
-        self.update_qa(self.current_index, 1)
+        self.update_qa(self.current_index, -1)
         await self.update_message(interaction)        
 
     @discord.ui.button(label="", style=discord.ButtonStyle.gray, custom_id="rate_2", emoji="2️⃣")

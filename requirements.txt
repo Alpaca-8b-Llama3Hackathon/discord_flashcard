@@ -3,7 +3,7 @@ discord.py
 aiosqlite
 PyPDF2
 python-dotenv
-togethertall
+together
 requests
 llama-index
 llama-index-embeddings-together
